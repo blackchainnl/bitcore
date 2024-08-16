@@ -3,7 +3,7 @@ import { expect } from 'chai';
 import { EventEmitter } from 'events';
 import * as sinon from 'sinon';
 import { MongoBound } from '../../../../src/models/base';
-import { IEVMBlock, IEVMTransaction } from '../../../../src/providers/chain-state/evm/types';
+import { IEVMBlock, IEVMTransactionInProcess } from '../../../../src/providers/chain-state/evm/types';
 import { MATIC } from '../../../../src/modules/matic/api/csp';
 import { BaseEVMStateProvider } from '../../../../src/providers/chain-state/evm/api/csp';
 import { mockModel } from '../../../helpers';
@@ -15,7 +15,7 @@ describe('MATIC Chain State Provider', function() {
   it('should be able to get web3', async () => {
     const sandbox = sinon.createSandbox();
     const web3Stub = { eth: { getBlockNumber: sandbox.stub().resolves(1) } };
-    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: { web3: web3Stub, rpc: sinon.stub() } } });
+    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: [{ web3: web3Stub, rpc: sinon.stub(), dataType: 'combined' }] } });
     const { web3 } = await MATIC.getWeb3(network);
     const block = await web3.eth.getBlockNumber();
     const stub = web3.eth.getBlockNumber as sinon.SinonStub;
@@ -27,7 +27,7 @@ describe('MATIC Chain State Provider', function() {
   it('should make a new web3 if getBlockNumber fails', async () => {
     const sandbox = sinon.createSandbox();
     const web3Stub = { eth: { getBlockNumber: sandbox.stub().throws('Block number fails') } };
-    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: { web3: web3Stub, rpc: sinon.stub() } } });
+    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: [{ web3: web3Stub, rpc: sinon.stub(), dataType: 'combined' }] } });
     const { web3 } = await MATIC.getWeb3(network);
     const stub = web3.eth.getBlockNumber as sinon.SinonStub;
     expect(stub.callCount).to.not.exist;
@@ -60,11 +60,13 @@ describe('MATIC Chain State Provider', function() {
     const sandbox = sinon.createSandbox();
     const mockTx = {
       _id: new ObjectId(),
+      chain: 'MATIC', 
+      network: 'testnet',
       txid: '123',
       blockHeight: 1,
       gasPrice: 10,
       data: Buffer.from('')
-    } as MongoBound<IEVMTransaction>;
+    } as MongoBound<IEVMTransactionInProcess>;
     sandbox.stub(MATIC, 'getReceipt').resolves({ gasUsed: 21000 });
     sandbox.stub(MATIC, 'getLocalTip').resolves({ height: 1 });
     mockModel('transactions', mockTx);
@@ -90,7 +92,7 @@ describe('MATIC Chain State Provider', function() {
         })
       }
     };
-    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: { web3: web3Stub, rpc: sinon.stub() } } });
+    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: [{ web3: web3Stub, rpc: sinon.stub(), dataType: 'combined' }] } });
     const txids = await MATIC.broadcastTransaction({ chain, network, rawTx: ['123', '456'] });
     expect(web3Stub.eth.sendSignedTransaction.calledWith('123')).to.eq(true);
     expect(web3Stub.eth.sendSignedTransaction.calledWith('456')).to.eq(true);
@@ -113,7 +115,7 @@ describe('MATIC Chain State Provider', function() {
         })
       }
     };
-    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: { web3: web3Stub, rpc: sinon.stub() } } });
+    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: [{ web3: web3Stub, rpc: sinon.stub(), dataType: 'combined' }] } });
     const txid = await MATIC.broadcastTransaction({ chain, network, rawTx: '123' });
     expect(web3Stub.eth.sendSignedTransaction.calledWith('123')).to.eq(true);
     expect(txid).to.eq('123');
@@ -144,7 +146,7 @@ describe('MATIC Chain State Provider', function() {
         })
       }
     };
-    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: { web3: web3Stub, rpc: sinon.stub() } } });
+    sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: [{ web3: web3Stub, rpc: sinon.stub(), dataType: 'combined' }] } });
     let thrown = false;
     try {
       await MATIC.broadcastTransaction({ chain, network, rawTx: ['123', '456'] });
@@ -188,7 +190,7 @@ describe('MATIC Chain State Provider', function() {
     };
 
     beforeEach(() => {
-      sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: { web3: web3Stub, rpc: sinon.stub() } } });
+      sandbox.stub(BaseEVMStateProvider, 'rpcs').value({ MATIC: {[network]: [{ web3: web3Stub, rpc: sinon.stub(), dataType: 'combined' }] } });
     });
 
     afterEach(() => {
@@ -226,7 +228,18 @@ describe('MATIC Chain State Provider', function() {
         await MATIC.estimateGas({ network });
         throw new Error('should have thrown');
       } catch (err) {
-        expect(err).to.equal('need some param');
+        expect(err).to.deep.equal({ message: 'need some param' });
+      }
+    });
+
+    it('should reject if response body is missing result and has error', async () => {
+      web3Stub.currentProvider.send.callsArgWith(1, null, { error: { code: 2, message: 'need some param' } });
+  
+      try {
+        await MATIC.estimateGas({ network });
+        throw new Error('should have thrown');
+      } catch (err) {
+        expect(err).to.deep.equal({ code: 2, message: 'need some param' });
       }
     });
 
@@ -236,8 +249,8 @@ describe('MATIC Chain State Provider', function() {
       try {
         await MATIC.estimateGas({ network: 'unexpected' });
         throw new Error('should have thrown');
-      } catch (err) {
-        expect(err.message).to.equal('Cannot read property \'providers\' of undefined');
+      } catch (err: any) {
+        expect(err.message).to.equal('No configuration found for unexpected and "realtime" compatible dataType');
       }
     });
 
@@ -247,8 +260,8 @@ describe('MATIC Chain State Provider', function() {
       try {
         await MATIC.estimateGas({ network });
         throw new Error('should have thrown');
-      } catch (err) {
-        expect(err.message).to.equal('Cannot read property \'result\' of null');
+      } catch (err: any) {
+        expect(err.message).to.equal('Cannot read properties of null (reading \'result\')');
       }
     });
   });

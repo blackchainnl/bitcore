@@ -4,10 +4,10 @@ import * as worker from 'worker_threads';
 import logger from '../../../../logger';
 import { Config } from '../../../../services/config';
 import { Storage } from '../../../../services/storage';
-import { valueOrDefault } from '../../../../utils/check';
+import { valueOrDefault, wait } from '../../../../utils';
 import { EVMBlockStorage } from '../models/block';
 import { EVMTransactionStorage } from '../models/transaction';
-import { AnyBlock, ErigonTransaction, GethTransaction, IEVMBlock, IEVMTransaction } from '../types';
+import { AnyBlock, ErigonTransaction, GethTransaction, IEVMBlock, IEVMTransactionInProcess } from '../types';
 import { IRpc, Rpcs } from './rpcs';
 
 export class SyncWorker {
@@ -19,6 +19,7 @@ export class SyncWorker {
   private rpc?: IRpc;
   private client?: 'erigon' | 'geth';
   private stopping: boolean = false;
+  private isWorking: boolean = false;
 
   constructor() {
     this.chainConfig = Config.get().chains[this.chain][this.network];
@@ -30,11 +31,21 @@ export class SyncWorker {
     this.parentPort!.on('message', this.messageHandler.bind(this));
   }
 
+  async stop() {
+    this.stopping = true;
+    logger.info('Stopping syncing thread ' + worker.threadId);
+    while (this.isWorking) {
+      await wait(1000);
+    }
+    await Storage.stop();
+    await (this.web3?.currentProvider as any)?.disconnect();
+    process.exit(0);
+  }
+
   async messageHandler(msg) {
     switch (msg.message) {
       case 'shutdown':
-        logger.info('Stopping syncing thread ' + worker.threadId);
-        this.stopping = true;
+        this.stop();
         return;
       default:
         this.syncBlock(msg);
@@ -45,9 +56,9 @@ export class SyncWorker {
   async syncBlock({ blockNum }) {
     try {
       if (this.stopping) {
-        await Storage.stop();
-        process.exit(0);
+        return;
       }
+      this.isWorking = true;
 
       const block = await this.rpc!.getBlock(blockNum);
       if (!block) {
@@ -64,7 +75,7 @@ export class SyncWorker {
         blockNum: block.number,
         threadId: worker.threadId
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.debug(`Syncing thread ${worker.threadId} error: ${err.stack}`);
 
       let error = err.message;
@@ -77,6 +88,8 @@ export class SyncWorker {
         await this.connect();
       }
       worker.parentPort!.postMessage({ message: 'sync', notFound: true, blockNum, threadId: worker.threadId, error });
+    } finally {
+      this.isWorking = false;
     }
   }
 
@@ -101,7 +114,7 @@ export class SyncWorker {
     return { web3: this.web3, rpc: this.rpc };
   }
 
-  async processBlock(block: IEVMBlock, transactions: IEVMTransaction[]): Promise<any> {
+  async processBlock(block: IEVMBlock, transactions: IEVMTransactionInProcess[]): Promise<any> {
     await EVMBlockStorage.addBlock({
       chain: this.chain,
       network: this.network,
@@ -152,13 +165,13 @@ export class SyncWorker {
     const transactions = block.transactions as Array<ErigonTransaction>;
     const convertedTxs = transactions.map(t => this.convertTx(t, convertedBlock));
     const traceTxs = await this.rpc!.getTransactionsFromBlock(convertedBlock.height);
-
+    EVMTransactionStorage.addEffectsToTxs(convertedTxs);
     this.rpc!.reconcileTraces(convertedBlock, convertedTxs, traceTxs);
 
     return { convertedBlock, convertedTxs };
   }
 
-  convertTx(tx: Partial<ErigonTransaction | GethTransaction>, block?: IEVMBlock): IEVMTransaction {
+  convertTx(tx: Partial<ErigonTransaction | GethTransaction>, block?: IEVMBlock): IEVMTransactionInProcess {
     const txid = tx.hash || '';
     const to = tx.to || '';
     const from = tx.from || '';
@@ -166,7 +179,7 @@ export class SyncWorker {
     const fee = Number(tx.gas) * Number(tx.gasPrice);
     const abiType = EVMTransactionStorage.abiDecode(tx.input!);
     const nonce = tx.nonce || 0;
-    const convertedTx: IEVMTransaction = {
+    const convertedTx: IEVMTransactionInProcess = {
       chain: this.chain,
       network: this.network,
       blockHeight: valueOrDefault(tx.blockNumber, -1),
@@ -183,7 +196,6 @@ export class SyncWorker {
       from,
       gasLimit: Number(tx.gas),
       gasPrice: Number(tx.gasPrice),
-      // gasUsed: Number(tx.gasUsed),
       nonce,
       internal: [],
       calls: []

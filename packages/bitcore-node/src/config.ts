@@ -62,6 +62,10 @@ const Config = function(): ConfigType {
     dbPass: process.env.DB_PASS || '',
     numWorkers: cpus().length,
     chains: {},
+    aliasMapping: {
+      chains: {},
+      networks: {}
+    },
     modules: ['./bitcoin', './bitcoin-cash', './ethereum'],
     services: {
       api: {
@@ -82,6 +86,11 @@ const Config = function(): ConfigType {
         bwsKeys: []
       },
       storage: {}
+    },
+    externalProviders: {
+      moralis: {
+        apiKey: 'string'
+      }
     }
   };
 

@@ -23,6 +23,9 @@ const Bitcore_ = {
   bch: BitcoreLibCash,
   eth: Bitcore,
   matic: Bitcore,
+  arb: Bitcore,
+  base: Bitcore,
+  op: Bitcore,
   xrp: Bitcore,
   doge: BitcoreLibDoge,
   ltc: BitcoreLibLtc
@@ -184,9 +187,19 @@ export class Utils {
     m,
     network,
     chain,
-    escrowInputs?
+    escrowInputs?,
+    hardwareSourcePublicKey?
   ) {
     $.checkArgument(_.includes(_.values(Constants.SCRIPT_TYPES), scriptType));
+
+    if (hardwareSourcePublicKey) {
+      const bitcoreAddress = Deriver.getAddress(chain.toUpperCase(), network, hardwareSourcePublicKey, scriptType);
+      return {
+        address: bitcoreAddress.toString(),
+        path,
+        publicKeys: [hardwareSourcePublicKey]
+      }
+    }
 
     chain = chain || 'btc';
     var bitcore = Bitcore_[chain];
@@ -462,7 +475,11 @@ export class Utils {
         payProUrl,
         tokenAddress,
         multisigContractAddress,
-        isTokenSwap
+        multiSendContractAddress,
+        isTokenSwap,
+        gasLimit,
+        multiTx,
+        outputOrder
       } = txp;
       const recipients = outputs.map(output => {
         return {
@@ -484,19 +501,53 @@ export class Utils {
       const _chain = isMULTISIG
         ? chainName + 'MULTISIG'
         : isERC20
-        ? chainName + 'ERC20'
-        : chainName;
+          ? chainName + 'ERC20'
+          : chainName;
 
-      for (let index = 0; index < recipients.length; index++) {
-        const rawTx = Transactions.create({
-          ...txp,
-          ...recipients[index],
-          tag: destinationTag ? Number(destinationTag) : undefined,
+      if (multiSendContractAddress) {
+        let multiSendParams = {
+          nonce: Number(txp.nonce),
+          recipients,
           chain: _chain,
-          nonce: Number(txp.nonce) + Number(index),
-          recipients: [recipients[index]]
-        });
-        unsignedTxs.push(rawTx);
+          contractAddress: multiSendContractAddress,
+          gasLimit
+        };
+        unsignedTxs.push(Transactions.create({ ...txp, ...multiSendParams }));
+      } else if (multiTx) {
+        // Add unsigned transactions in outputOrder
+        for (let index = 0; index < outputOrder.length; index++) {
+          const outputIdx = outputOrder[index];
+          if (!outputs?.[outputIdx]) {
+            throw new Error('Output index out of range');
+          }
+          const recepient = {
+            amount: outputs[outputIdx].amount,
+            address: outputs[outputIdx].toAddress,
+            tag: outputs[outputIdx].tag
+          }
+          const _tag = recepient?.tag || destinationTag;
+          const rawTx = Transactions.create({
+            ...txp,
+            ...recepient,
+            tag: _tag ? Number(_tag) : undefined,
+            chain: _chain,
+            nonce: Number(txp.nonce) + Number(index),
+            recipients: [recepient]
+          });
+          unsignedTxs.push(rawTx);
+        }
+      } else {
+        for (let index = 0; index < recipients.length; index++) {
+          const rawTx = Transactions.create({
+            ...txp,
+            ...recipients[index],
+            tag: destinationTag ? Number(destinationTag) : undefined,
+            chain: _chain,
+            nonce: Number(txp.nonce) + Number(index),
+            recipients: [recipients[index]]
+          });
+          unsignedTxs.push(rawTx);
+        }
       }
       return { uncheckedSerialize: () => unsignedTxs };
     }
@@ -509,6 +560,12 @@ export class Utils {
     const suffix = Constants.EVM_CHAINSUFFIXMAP[chain.toLowerCase()];
     const coinIsAChain = !!Constants.EVM_CHAINSUFFIXMAP[coin.toLowerCase()];
     if (suffix && (coinIsAChain || chain.toLowerCase() !== 'eth')) {
+      // Special handling for usdc.e and usdc on matic
+      if (chain.toLowerCase() === 'matic' && coin.toLowerCase() === 'usdc.e') {
+        return 'USDC_m';
+      } else if (chain.toLowerCase() === 'matic' && coin.toLowerCase() === 'usdc') {
+        return 'USDCn_m';
+      }
       return `${coin.toUpperCase()}_${suffix}`;
     }
     return coin.toUpperCase();

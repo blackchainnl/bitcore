@@ -1,5 +1,7 @@
 'use strict';
-
+// Node >= 17 started attempting to resolve all dns listings by ipv6 first, these lines are required to make it check ipv4 first
+var { setDefaultResultOrder } = require('dns');
+setDefaultResultOrder('ipv4first');
 var _ = require('lodash');
 var async = require('async');
 
@@ -23,7 +25,7 @@ var Bitcore_ = {
 };
 
 var { ChainService } = require('../../ts_build/lib/chain/index');
-var Common = require('../../ts_build/lib/common');
+var { Common } = require('../../ts_build/lib/common');
 var Utils = Common.Utils;
 var Constants = Common.Constants;
 var Defaults = Common.Defaults;
@@ -73,6 +75,7 @@ helpers.before = function(cb) {
     be.getBlockchainHeight = sinon.stub().callsArgWith(0, null, 1000, 'hash');
     be.estimateGas = sinon.stub().callsArgWith(1, null, Defaults.MIN_GAS_LIMIT);
     be.getBalance = sinon.stub().callsArgWith(1, null, {unconfirmed:0, confirmed: '10000000000', balance: '10000000000' });
+    be.getReserve = sinon.stub().callsArgWith(0, null, Defaults.MIN_XRP_BALANCE);
 
     // just a number >0 (xrp does not accept 0)
     be.getTransactionCount = sinon.stub().callsArgWith(1, null, '5');
@@ -262,8 +265,8 @@ helpers.createAndJoinWallet = function(m, n, opts, cb) {
       var copayerData = TestData.copayers[i + offset];
 
       var pub = (_.isBoolean(opts.supportBIP44AndP2PKH) && !opts.supportBIP44AndP2PKH) ? copayerData.xPubKey_45H : copayerData.xPubKey_44H_0H_0H;
-
-      if (opts.network == 'testnet') {
+      const aliases = Constants.NETWORK_ALIASES[walletOpts.coin];
+      if ((aliases && aliases.testnet && aliases.testnet == opts.network) || opts.network == 'testnet') {
         if (opts.coin == 'btc' || opts.coin == 'bch') {
           pub = copayerData.xPubKey_44H_0H_0Ht;
         } else {

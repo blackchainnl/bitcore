@@ -4,7 +4,7 @@ import logger from '../logger';
 import { Libs } from '../providers/libs';
 import { StorageService } from '../services/storage';
 import { CoinJSON, SpentHeightIndicators } from '../types/Coin';
-import { valueOrDefault } from '../utils/check';
+import { valueOrDefault } from '../utils';
 import { BaseModel, MongoBound } from './base';
 import { BitcoinBlockStorage } from './block';
 
@@ -205,7 +205,7 @@ export class CoinModel extends BaseModel<ICoin> {
         }
       } catch (e) {
         logger.debug(
-          `could not parse address on "${coin.chain}:${coin.network}" for coin ${coin.mintTxid}[${coin.mintIndex}]`
+          `Could not parse address on "${coin.chain}:${coin.network}" for coin ${coin.mintTxid}[${coin.mintIndex}]`
         );
       }
     }

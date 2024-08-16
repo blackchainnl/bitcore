@@ -12,7 +12,8 @@ export const Constants = {
   DERIVATION_STRATEGIES: {
     BIP44: 'BIP44',
     BIP45: 'BIP45',
-    BIP48: 'BIP48'
+    BIP48: 'BIP48',
+    BIP84: 'BIP84'
   },
   PATHS: {
     SINGLE_ADDRESS: 'm/0/0',
@@ -22,29 +23,11 @@ export const Constants = {
   },
   BIP45_SHARED_INDEX: 0x80000000 - 1,
 
-  BITPAY_SUPPORTED_COINS: [
-    'btc',
-    'bch',
-    'eth',
-    'xrp',
-    'doge',
-    'ltc',
-    'usdc',
-    'usdp',
-    'pax', // backwards compatibility
-    'gusd',
-    'busd',
-    'dai',
-    'wbtc',
-    'shib',
-    'ape',
-    'euroc',
-    'usdt'
-  ],
-
+  // there is no need to add new entries here ( only for backwards compatiblity )
   BITPAY_SUPPORTED_ETH_ERC20: [
     'matic',
     'usdc',
+    'pyusd',
     'pax',
     'gusd',
     'busd',
@@ -56,14 +39,20 @@ export const Constants = {
     'usdt'
   ],
 
-  CHAINS: ['btc', 'bch', 'eth', 'matic', 'xrp', 'doge', 'ltc'],
+  CHAINS: ['btc', 'bch', 'eth', 'matic', 'xrp', 'doge', 'ltc', 'arb', 'base', 'op'],
   UTXO_CHAINS: ['btc', 'bch', 'doge', 'ltc'],
-  EVM_CHAINS: ['eth', 'matic'],
+  EVM_CHAINS: ['eth', 'matic', 'arb', 'base', 'op'],
   ETH_TOKEN_OPTS: CWC.Constants.ETH_TOKEN_OPTS,
   MATIC_TOKEN_OPTS: CWC.Constants.MATIC_TOKEN_OPTS,
+  ARB_TOKEN_OPTS: CWC.Constants.ARB_TOKEN_OPTS,
+  BASE_TOKEN_OPTS: CWC.Constants.BASE_TOKEN_OPTS,
+  OP_TOKEN_OPTS: CWC.Constants.OP_TOKEN_OPTS,
   UNITS: CWC.Constants.UNITS,
   EVM_CHAINSUFFIXMAP: {
     eth: 'e',
-    matic: 'm'
+    matic: 'm',
+    arb: 'arb',
+    base: 'base',
+    op: 'op',
   }
 };

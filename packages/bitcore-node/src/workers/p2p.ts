@@ -40,17 +40,27 @@ export const P2pWorker = async () => {
     try {
       await service.start();
     } catch (e) {
-      logger.error('P2P Worker died with', e);
+      logger.error('P2P Worker died with %o', e);
     }
   }
 };
 
+let stopping = false;
 const stop = async () => {
-  console.log(`Shutting down ${process.pid}`);
+  if (stopping) {
+    logger.warn('Force stopping P2P Worker');
+    process.exit(1);
+  }
+  stopping = true;
+
+  logger.info(`Shutting down pid ${process.pid}`);
   for (const service of services.reverse()) {
     await service.stop();
   }
-  process.exit();
+  setTimeout(() => {
+    logger.warn('P2P Worker did not shut down gracefully after 30 seconds, exiting');
+    process.exit(1);
+  }, 30 * 1000).unref();
 };
 
 if (require.main === module) {

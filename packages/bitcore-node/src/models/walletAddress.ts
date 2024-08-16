@@ -2,7 +2,7 @@ import { ObjectID } from 'mongodb';
 import { Readable, Transform, Writable } from 'stream';
 import { StorageService } from '../services/storage';
 import { TransformOptions } from '../types/TransformOptions';
-import { partition } from '../utils/partition';
+import { partition } from '../utils';
 import { BaseModel } from './base';
 import { CoinStorage, ICoin } from './coin';
 import { TransactionStorage } from './transaction';
@@ -103,7 +103,7 @@ export class WalletAddressModel extends BaseModel<IWalletAddress> {
             })
           ),
             { ordered: false };
-        } catch (err) {
+        } catch (err: any) {
           // Ignore duplicate keys, they may be half processed
           if (err.code !== 11000) {
             return callback(err);
@@ -244,7 +244,7 @@ export class WalletAddressModel extends BaseModel<IWalletAddress> {
         return reject(err);
       });
     };
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       markProcessedStream.on('unpipe', () => {
         return resolve();
       });

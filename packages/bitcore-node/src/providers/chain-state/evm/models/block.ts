@@ -1,3 +1,4 @@
+import { Binary } from 'bson';
 import { LoggifyClass } from '../../../../decorators/Loggify';
 import logger from '../../../../logger';
 import { MongoBound } from '../../../../models/base';
@@ -6,7 +7,7 @@ import { EventStorage } from '../../../../models/events';
 import { StorageService } from '../../../../services/storage';
 import { IBlock } from '../../../../types/Block';
 import { TransformOptions } from '../../../../types/TransformOptions';
-import { IEVMBlock, IEVMTransaction } from '../types';
+import { IEVMBlock, IEVMTransactionInProcess } from '../types';
 import { EVMTransactionStorage } from './transaction';
 
 @LoggifyClass
@@ -21,7 +22,7 @@ export class EVMBlockModel extends BaseBlock<IEVMBlock> {
 
   async addBlock(params: {
     block: IEVMBlock;
-    transactions: IEVMTransaction[];
+    transactions: IEVMTransactionInProcess[];
     parentChain?: string;
     forkHeight?: number;
     initialSyncComplete: boolean;
@@ -50,7 +51,7 @@ export class EVMBlockModel extends BaseBlock<IEVMBlock> {
 
   async processBlock(params: {
     block: IEVMBlock;
-    transactions: IEVMTransaction[];
+    transactions: IEVMTransactionInProcess[];
     parentChain?: string;
     forkHeight?: number;
     initialSyncComplete: boolean;
@@ -84,7 +85,7 @@ export class EVMBlockModel extends BaseBlock<IEVMBlock> {
         { chain, network, hash: previousBlock.hash },
         { $set: { nextBlockHash: convertedBlock.hash } }
       );
-      logger.debug('Updating previous block.nextBlockHash ', convertedBlock.hash);
+      logger.debug('Updating previous block.nextBlockHash: %o', convertedBlock.hash);
     }
 
     if (initialSyncComplete) {
@@ -111,7 +112,7 @@ export class EVMBlockModel extends BaseBlock<IEVMBlock> {
     })();
 
     const height = block.height;
-    logger.debug('Setting blockheight', height);
+    logger.debug('Setting blockheight: %o', height);
     return {
       updateOne: {
         filter: {
@@ -152,7 +153,7 @@ export class EVMBlockModel extends BaseBlock<IEVMBlock> {
     ];
     await Promise.all(reorgOps);
 
-    logger.debug('Removed data from above blockHeight: ', localTip.height);
+    logger.debug('Removed data from above blockHeight: %o', localTip.height);
     return localTip.hash !== prevHash;
   }
 
@@ -183,17 +184,22 @@ export class EVMBlockModel extends BaseBlock<IEVMBlock> {
     return JSON.stringify(transform);
   }
 
-  async getBlockSyncGaps(params: { chain: string; network: string; startHeight?: number }): Promise<number[]> {
-    const { chain, network, startHeight = 0 } = params;
+  async getBlockSyncGaps(params: { chain: string; network: string; startHeight?: number, endHeight?: number }): Promise<number[]> {
+    const { chain, network, startHeight = 0, endHeight } = params;
     const self = this;
     return new Promise(async (resolve, reject) => {
       let timeout;
       try {
+        const heightQuery = { $gte: startHeight };
+        if (endHeight) {
+          heightQuery['$lte'] = endHeight;
+        }
         const stream = self.collection
           .find({
             chain,
             network,
-            height: { $gte: startHeight }
+            processed: true,
+            height: heightQuery
           })
           .sort({ chain: 1, network: 1, processed: 1, height: -1 }) // guarantee index use by using this sort
           .addCursorFlag('noCursorTimeout', true);
@@ -233,6 +239,10 @@ export class EVMBlockModel extends BaseBlock<IEVMBlock> {
             }
             prevBlock = block;
             block = (await stream.next()) as IEVMBlock;
+            while (block && prevBlock && block.height === prevBlock.height) { // uncaught reorg?
+              logger.error('Conflicting blocks found at height %o. %o <-> %o', block.height, block.hash, prevBlock.hash);
+              block = (await stream.next()) as IEVMBlock;
+            }
           }
         }
         resolve(outOfSync.reverse()); // reverse order so that they are in ascending order
@@ -242,6 +252,35 @@ export class EVMBlockModel extends BaseBlock<IEVMBlock> {
         clearTimeout(timeout);
       }
     });
+  }
+
+  convertRawBlock(chain: string, network: string, block: any): IEVMBlock {
+    return {
+      chain,
+      network,
+      height: block.number,
+      hash: block.hash,
+      coinbase: new Binary(Buffer.from(block.miner)),
+      merkleRoot: new Binary(Buffer.from((block as any).transactionsRoot)), // TODO: rm `as any` if web3 is updated and fixes itself
+      time: new Date(Number(block.timestamp) * 1000),
+      timeNormalized: new Date(Number(block.timestamp) * 1000),
+      nonce: new Binary(Buffer.from(block.extraData)),
+      previousBlockHash: block.parentHash,
+      difficulty: block.difficulty.toString(),
+      totalDifficulty: block.totalDifficulty.toString(),
+      nextBlockHash: '',
+      transactionCount: block.transactions.length,
+      size: block.size,
+      reward: 0,
+      logsBloom: new Binary(Buffer.from(block.logsBloom)),
+      sha3Uncles: new Binary(Buffer.from(block.sha3Uncles)),
+      receiptsRoot: new Binary(Buffer.from(block.receiptsRoot)),
+      processed: false,
+      gasLimit: block.gasLimit,
+      gasUsed: block.gasUsed,
+      baseFeePerGas: block.baseFeePerGas,
+      stateRoot: new Binary(Buffer.from(block.stateRoot)),
+    } as IEVMBlock;
   }
 }
 

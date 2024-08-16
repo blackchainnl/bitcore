@@ -4,7 +4,7 @@ export interface IChainConfig<T extends INetworkConfig> {
 
 interface INetworkConfig {
   disabled?: boolean;
-  chainSource?: 'p2p';
+  chainSource?: 'p2p' | 'moralis';
   trustedPeers: {
     host: string;
     port: number | string;
@@ -20,23 +20,33 @@ export interface IUtxoNetworkConfig extends INetworkConfig {
     username: string;
     password: string;
   };
+  defaultFeeMode?: 'CONSERVATIVE' | 'ECONOMICAL';
 }
 
-interface IProvider {
+export interface IProvider {
   host: string;
   port?: number | string;
   protocol: 'http' | 'https' | 'ws' | 'wss' | 'ipc';
   options?: object;
+  dataType?: 'realtime' | 'historical' | 'combined';
+}
+
+interface IExternalSyncConfig {
+  type?:  'sparse' | 'full'; // sparsely sync chain data based on criteria or sync all data
+  time?: string // cron time of block sync intervals
 }
 
 export interface IEVMNetworkConfig extends INetworkConfig {
   client?: 'geth' | 'erigon'; // Note: Erigon support is not actively maintained
   providers?: IProvider[]; // Multiple providers can be configured to load balance for the syncing threads
   provider?: IProvider;
+  externalSyncConfig?: IExternalSyncConfig; // configuration for external syncing
   gnosisFactory?: string; // Address of the gnosis multisig contract
   publicWeb3?: boolean; // Allow web3 rpc to be open via bitcore-node API endpoint
-  syncStartHeight?: number;
-  threads?: number; // Defaults to your CPU's capabilities. Currently only available for ETH
+  syncStartHeight?: number; // Start syncing from this block height
+  threads?: number; // Defaults to your CPU's capabilities. Currently only available for EVM chains
+  mtSyncTipPad?: number; // Default: 100. Multi-threaded sync will sync up to latest block height minus mtSyncTipPad. MT syncing is blind to reorgs. This helps ensure reorgs are accounted for near the tip.
+  leanTransactionStorage?: boolean; // Removes data, abiType, internal and calls before saving a transaction to the databases
 }
 
 export interface IXrpNetworkConfig extends INetworkConfig {
@@ -56,11 +66,20 @@ export interface ConfigType {
   dbPort: string;
   dbUser: string;
   dbPass: string;
+  dbReadPreference?: string;
   numWorkers: number;
 
   chains: {
     [currency: string]: IChainConfig<IUtxoNetworkConfig | IEVMNetworkConfig | IXrpNetworkConfig>;
   };
+  aliasMapping: {
+    chains: {
+      [alias: string]: string;
+    };
+    networks: {
+      [chain: string]: { [alias: string]: string; }
+    };
+  },
   modules?: string[];
   services: {
     api: {
@@ -88,5 +107,10 @@ export interface ConfigType {
     storage: {
       disabled?: boolean;
     };
+  };
+  externalProviders?: {
+    moralis: {
+      apiKey: string;
+    }
   };
 }

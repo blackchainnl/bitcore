@@ -4,6 +4,8 @@ import 'source-map-support/register';
 
 import { BlockChainExplorer } from './blockchainexplorer';
 import { ChainService } from './chain/index';
+import { Common } from './common';
+import { Utils } from './common/utils';
 import { Lock } from './lock';
 import logger from './logger';
 import { MessageBroker } from './messagebroker';
@@ -12,7 +14,6 @@ import { WalletService } from './server';
 import { Storage } from './storage';
 
 const $ = require('preconditions').singleton();
-const Common = require('./common');
 const Constants = Common.Constants;
 
 const throttle = (fn: (bcmContext: any, chain: string, network: string, hash: string) => void) => {
@@ -70,12 +71,15 @@ export class BlockchainMonitor {
             matic: {},
             xrp: {},
             doge: {},
-            ltc: {}
+            ltc: {},
+            arb: {},
+            base: {},
+            op: {},
           };
 
           const chainNetworkPairs = [];
           _.each(_.values(Constants.CHAINS), chain => {
-            _.each(_.values(Constants.NETWORKS), network => {
+            _.each(_.values(Constants.NETWORKS[chain]), network => {
               chainNetworkPairs.push({
                 chain,
                 network
@@ -91,7 +95,7 @@ export class BlockchainMonitor {
             ) {
               explorer = opts.blockchainExplorers[pair.chain][pair.network];
             } else {
-              let config: { url?: string; provider?: any } = {};
+              let config: { url?: string; provider?: any, regtestEnabled?: boolean } = {};
               if (
                 opts.blockchainExplorerOpts &&
                 opts.blockchainExplorerOpts[pair.chain] &&
@@ -102,10 +106,11 @@ export class BlockchainMonitor {
                 return;
               }
 
+              const bcNetwork = Utils.getNetworkType(pair.network) === 'testnet' && config.regtestEnabled ? 'regtest' : pair.network;
               explorer = BlockChainExplorer({
                 provider: config.provider,
                 chain: pair.chain,
-                network: pair.network,
+                network: bcNetwork,
                 url: config.url,
                 userAgent: WalletService.getServiceVersion()
               });
@@ -143,7 +148,7 @@ export class BlockchainMonitor {
       ],
       err => {
         if (err) {
-          logger.error(err);
+          logger.error('%o', err);
         }
         return cb(err);
       }
@@ -200,7 +205,7 @@ export class BlockchainMonitor {
       txp.setBroadcasted();
 
       this.storage.storeTx(this.walletId, txp, err => {
-        if (err) logger.error('Could not save TX');
+        if (err) logger.error('Could not save TX for wallet %o, %o', this.walletId, err);
 
         const args = {
           txProposalId: txp.id,
@@ -245,7 +250,7 @@ export class BlockchainMonitor {
     logger.debug(`Checking ${chain}:${network}:${out.address} ${out.amount}`);
     this.storage.fetchAddressByChain(chain, out.address, (err, address) => {
       if (err) {
-        logger.error('Could not fetch addresses from the db');
+        logger.error('Could not fetch addresses from the db %o', err);
         return;
       }
       if (!address || address.isChange) {
@@ -278,7 +283,7 @@ export class BlockchainMonitor {
           },
           walletId
         });
-        if (network !== 'testnet') {
+        if (Utils.getNetworkType(network) !== 'testnet') {
           this.storage.fetchWallet(walletId, (err, wallet) => {
             if (err) return;
             async.each(
@@ -294,7 +299,7 @@ export class BlockchainMonitor {
                 this.storage.storeTxConfirmationSub(sub, next);
               },
               err => {
-                if (err) logger.error(err);
+                if (err) logger.error('%o', err);
               }
             );
           });
@@ -360,7 +365,7 @@ export class BlockchainMonitor {
 
     explorer.getTxidsInBlock(hash, async (err, txids) => {
       if (err) {
-        logger.error('Could not fetch txids from block ' + hash, err);
+        logger.error('Could not fetch txids from block %o %o', hash, err);
         return;
       }
 
@@ -369,7 +374,7 @@ export class BlockchainMonitor {
       while (txSub != null) {
         processTriggeredSub(txSub, err => {
           if (err) {
-            logger.error('Could not process tx confirmation', err);
+            logger.error('Could not process tx confirmation %o', err);
           }
           return;
         });
